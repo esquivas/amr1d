@@ -68,7 +68,6 @@ program euler_amr
     ! time counter increases
     time=time+dt
 
-    if(itprint == 98) stop "Reached max iterations"
   end do
 
   stop
