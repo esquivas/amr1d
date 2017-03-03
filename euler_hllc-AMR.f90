@@ -239,37 +239,6 @@ subroutine getRight(nb, nbRight)
   return
 end subroutine getRight
 
-
-!
-!
-!
-! subroutine getNeighbors(nb,nbLeft)
-!   use globals, only : ActiveBlocks
-!   implicit none
-!   integer, intent(in)  :: nb
-!   integer, intent(out) :: nbLeft, nbRight
-!   integer  :: selfID, IDLeft, IDRight, IDfather
-!
-!   !   get bID of current block
-!   selfID = ActiveBlocks(nb)
-!
-!   ! Try if neighbor is at same level
-!   IDLeft  = selfID - 1
-!   IDRight = selfID + 1
-!   call get_nb(IDLeft ,nbLeft)
-!   call get_nb(IDRight,nbRight)
-!
-!   if ((nbLeft /= -1).and.(nbRight /= -1) return
-!
-!   !  At a lower level
-!   IDfather = selfID/2
-!   if (nbLeft  /= -1) call get_nb(IDfather-1,nbLeft)
-!   if (nbRight /= -1) call get_nb(IDfather+1,nbRight)
-!
-!
-!   return
-! end subroutine getNeighbors
-
 !=======================================================================
 !generates initial condition
 subroutine initconds(time, tprint, itprint)
@@ -586,7 +555,7 @@ subroutine boundaries(u)
       else
         u(:,nx+1,nb)=u(:,1 ,nbR)
       endif
-      
+
     end if
   end do
 
