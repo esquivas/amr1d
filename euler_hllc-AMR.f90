@@ -102,8 +102,9 @@ subroutine init_mesh()
   ActiveBlocks(6) = 25
   ActiveBlocks(7) = 7
   ActiveBlocks(8) = 13
-
   lastActive = 8
+
+  return
 end subroutine init_mesh
 
 !=======================================================================
