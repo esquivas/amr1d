@@ -18,14 +18,14 @@ module globals
   !   maximumn number of blocks
   integer, parameter :: nbmax = 16
   !   Here we set the extent of X
-  real, parameter :: xmax=2.*acos(-1.)
+  real, parameter :: xmax=1.
   real, parameter :: gamma=1.4
   !   This is a vector that contains u(x)
   real :: u(3,0:nx+1,nbmax), prim(3,0:nx+1,nbmax)
   !  other arrays and variables needed in AMR
   real    :: dx(nlevs)
   integer :: minID(nlevs), maxID(nlevs),ActiveBlocks(nbmax)
-  integer :: maxActive
+  integer :: lastActive
 end module globals
 
 !=======================================================================
@@ -78,7 +78,7 @@ end program euler_amr
 !  Initializes all things mesh
 subroutine init_mesh()
   use globals, only : nx, nlevs, xmax, dx, minID, maxID, ActiveBlocks, &
-                      maxActive
+                      lastActive
   implicit none
   integer :: nl
 
@@ -104,7 +104,7 @@ subroutine init_mesh()
   ActiveBlocks(7) = 7
   ActiveBlocks(8) = 13
 
-  maxActive = 8
+  lastActive = 8
 end subroutine init_mesh
 
 !=======================================================================
@@ -158,10 +158,10 @@ subroutine initconds(time, tprint, itprint)
   integer, intent (out) :: itprint
   integer :: nb, level, i
   real    :: xb, x
-  real    :: xp = 2.8
+  real    :: xp = 0.45
 
   !  sweep all ActiveBlocks
-  do nb = 1, maxActive
+  do nb = 1, lastActive
     !   get the level and position of first cell in each block
     if (ActiveBlocks(nb) /= -1) then
 
@@ -180,7 +180,7 @@ subroutine initconds(time, tprint, itprint)
           u(3,i,nb)=0.1/(gamma-1.)
         end if
         !
-        if( (x-0.5*dx(level) <= xp).and.(x+0.5*dx(level) >= xp) ) then
+        if( (x-0.5*dx(level) < xp).and.(x+0.5*dx(level) > xp) ) then
           u(1,i,nb)=1.125/2.
           u(2,i,nb)=0.0
           u(3,i,nb)=1.1/2./(gamma-1.)
@@ -203,13 +203,13 @@ end subroutine initconds
 !=======================================================================
 ! computes the primitives as a function of the Us
 subroutine u2prim(u,prim)
-  use globals, only : nx, nbmax, gamma, maxActive, ActiveBlocks
+  use globals, only : nx, nbmax, gamma, lastActive, ActiveBlocks
   implicit none
   real , intent(in)   :: u   (3,0:nx+1,nbmax)
   real , intent(out)  :: prim(3,0:nx+1,nbmax)
   integer :: i,nb
 
-  do nb=1, maxActive
+  do nb=1, lastActive
     if (ActiveBlocks(nb) /= -1 ) then
 
       do i=0,nx+1
@@ -239,7 +239,7 @@ subroutine output(itprint)
   open(unit=10,file=file1,status='unknown')
 
   ! writes x and rho, u(=vx) and P
-  do nb=1,maxActive
+  do nb=1,lastActive
     if (ActiveBlocks(nb) /= -1) then
       call getLevel(ActiveBlocks(nb),level)
       call getBlockPosition(ActiveBlocks(nb),x)
@@ -267,7 +267,7 @@ subroutine timestep(dt)
 
   del=1E30
   !   sweep all active blocks
-  do nb = 1, maxActive
+  do nb = 1, lastActive
     if (ActiveBlocks(nb) /= -1) then
 
       call getLevel(ActiveBlocks(nb),lev)
@@ -298,7 +298,7 @@ subroutine tstep(dt,time)
   !  obtain the fluxes
   call hllcfluxes(prim,f)
 
-  do nb=1,maxActive
+  do nb=1,lastActive
     if (ActiveBlocks(nb) /= -1) then
       call getLevel(ActiveBlocks(nb),level)
       dtx=dt/dx(level)
@@ -313,7 +313,7 @@ subroutine tstep(dt,time)
   call boundaries(up)
 
   ! copy the up to the u
-  u(:,:,1:maxActive)=up(:,:,1:maxActive)
+  u(:,:,1:lastActive)=up(:,:,1:lastActive)
 
   return
 end subroutine tstep
@@ -321,14 +321,14 @@ end subroutine tstep
 !=======================================================================
 !  computes the HLLC fluxes in the entire domain
 subroutine hllcfluxes(prim,f)
-  use globals, only : gamma, nx, nbmax, ActiveBlocks, maxActive
+  use globals, only : gamma, nx, nbmax, ActiveBlocks, lastActive
   implicit none
   real,    intent(in) :: prim(3,0:nx+1,nbmax)
   real,    intent(out)::    f(3,0:nx+1,nbmax)
   integer :: i, nb
   real :: priml(3), primr(3), ff(3)
 
-  do nb=1,maxActive
+  do nb=1,lastActive
     if(ActiveBlocks(nb) /= -1) then
       do i=0,nx
 
@@ -436,7 +436,7 @@ end subroutine prim2u
 !=======================================================================
 ! Set boundary conditions
 subroutine boundaries(u)
-  use globals, only : maxActive, ActiveBlocks, nx, nbmax
+  use globals, only : lastActive, ActiveBlocks, nx, nbmax
   implicit none
   real,    intent(out):: u(3,0:nx+1,nbmax)
   integer :: i,nb
@@ -445,7 +445,7 @@ subroutine boundaries(u)
   !u(:,0 )=u(:,nx)
   !u(:,nx+1)=u(:,1)
 
-  do nb=1, maxActive
+  do nb=1, lastActive
     if (ActiveBlocks(nb) /= -1) then
       !  open boundary conditions
       u(:,0   ,nb)=u(:,1, nb)
