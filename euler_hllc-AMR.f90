@@ -12,7 +12,7 @@ module globals
   implicit none
   !
   !   This is the number of points used to discretize X
-  integer, parameter :: nx=50
+  integer, parameter :: nx=20
   !   Number of levels allowed
   integer, parameter :: nlevs = 5
   !   maximumn number of blocks
@@ -156,13 +156,9 @@ subroutine get_nb(bID, nb)
   implicit none
   integer, intent(in)  :: bID
   integer, intent(out) :: nb
-  integer :: i
 
-  do i=1, lastActive
-    if (ActiveBlocks(i)==bID) then
-      nb = i
-      return
-    end if
+  do nb=1, lastActive
+    if (ActiveBlocks(nb)==bID) return
   end do
 
   nb = -1
