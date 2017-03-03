@@ -150,6 +150,127 @@ subroutine getBlockPosition(bID,x)
 end subroutine getBlockPosition
 
 !=======================================================================
+!   Obtains nb from bID (or -1 in case is not active)
+subroutine get_nb(bID, nb)
+  use globals, only : lastActive, ActiveBlocks
+  implicit none
+  integer, intent(in)  :: bID
+  integer, intent(out) :: nb
+  integer :: i
+
+  do i=1, lastActive
+    if (ActiveBlocks(i)==bID) then
+      nb = i
+      return
+    end if
+  end do
+
+  nb = -1
+
+  return
+end subroutine get_nb
+
+!=======================================================================
+!   Obtains the nb from the neighbor at the Left
+subroutine getLeft(nb, nbLeft)
+  use globals, only : ActiveBlocks, minID
+  implicit none
+  integer, intent(in)  :: nb
+  integer, intent(out) :: nbLeft
+  integer :: selfID, fatherID, level, sonID
+
+  !   get bID of current block
+  selfID = ActiveBlocks(nb)
+
+  !   domain boundary
+  call getLevel(selfID,level)
+  if (selfID == minID(level)) then
+    nbLeft = -1
+    return
+  end if
+
+  !  same level of refinement
+  call get_nb(selfID-1 ,nbLeft)
+  if (nbLeft /= -1) return
+
+  !  lower level of refinement
+  fatherID = selfID/2
+  call get_nb(fatherID-1 ,nbLeft)
+  if (nbLeft /= -1) return
+
+  !  higher resolution
+  sonID = selfID*2
+  call get_nb(sonID-1,nbLeft)
+
+  return
+end subroutine getLeft
+
+!=======================================================================
+!   Obtains the nb from the neighbor at the Right
+subroutine getRight(nb, nbRight)
+  use globals, only : ActiveBlocks, maxID
+  implicit none
+  integer, intent(in)  :: nb
+  integer, intent(out) :: nbRight
+  integer :: selfID, fatherID, level, sonID
+
+  !   get bID of current block
+  selfID = ActiveBlocks(nb)
+
+  !   domain boundary
+  call getLevel(selfID,level)
+  if (selfID == maxID(level)) then
+    nbRight = -1
+    return
+  end if
+
+  !  same level of refinement
+  call get_nb(selfID+1 ,nbRight)
+  if (nbRight /= -1) return
+
+  !  lower level of refinement
+  fatherID = selfID/2
+  call get_nb(fatherID+1 ,nbRight)
+  if (nbRight /= -1) return
+
+  sonID = selfID*2
+  call get_nb(sonID+2,nbRight)
+
+  return
+end subroutine getRight
+
+
+!
+!
+!
+! subroutine getNeighbors(nb,nbLeft)
+!   use globals, only : ActiveBlocks
+!   implicit none
+!   integer, intent(in)  :: nb
+!   integer, intent(out) :: nbLeft, nbRight
+!   integer  :: selfID, IDLeft, IDRight, IDfather
+!
+!   !   get bID of current block
+!   selfID = ActiveBlocks(nb)
+!
+!   ! Try if neighbor is at same level
+!   IDLeft  = selfID - 1
+!   IDRight = selfID + 1
+!   call get_nb(IDLeft ,nbLeft)
+!   call get_nb(IDRight,nbRight)
+!
+!   if ((nbLeft /= -1).and.(nbRight /= -1) return
+!
+!   !  At a lower level
+!   IDfather = selfID/2
+!   if (nbLeft  /= -1) call get_nb(IDfather-1,nbLeft)
+!   if (nbRight /= -1) call get_nb(IDfather+1,nbRight)
+!
+!
+!   return
+! end subroutine getNeighbors
+
+!=======================================================================
 !generates initial condition
 subroutine initconds(time, tprint, itprint)
   use globals
@@ -255,7 +376,7 @@ subroutine output(itprint)
   return
 end subroutine output
 !=======================================================================
-! computes the timestep allowed by the CFL criterium
+! computes the timestep allowed by the CFL
 subroutine timestep(dt)
   use globals
   implicit none
@@ -440,6 +561,7 @@ subroutine boundaries(u)
   implicit none
   real,    intent(out):: u(3,0:nx+1,nbmax)
   integer :: i,nb
+  integer :: nbL, nbR
 
   !   Periodic boundary conditions
   !u(:,0 )=u(:,nx)
@@ -447,9 +569,24 @@ subroutine boundaries(u)
 
   do nb=1, lastActive
     if (ActiveBlocks(nb) /= -1) then
+
       !  open boundary conditions
-      u(:,0   ,nb)=u(:,1, nb)
-      u(:,nx+1,nb)=u(:,nx,nb)
+      !  left
+      call getLeft(nb,nbL)
+      if (nbL == -1) then
+        u(:,0 ,nb)=u(:,1, nb )
+      else
+        u(:,0 ,nb)=u(:,nx,nbL)
+      endif
+
+      !  right
+      call getRight(nb,nbR)
+      if (nbR == -1) then
+        u(:,nx+1,nb)=u(:,nx,nb )
+      else
+        u(:,nx+1,nb)=u(:,1 ,nbR)
+      endif
+      
     end if
   end do
 
