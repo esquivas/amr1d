@@ -26,6 +26,7 @@ module globals
   real    :: dx(nlevs)
   integer :: minID(nlevs), maxID(nlevs),ActiveBlocks(nbmax)
   integer :: lastActive
+  !
 end module globals
 
 !=======================================================================
@@ -194,7 +195,7 @@ subroutine getLeft(nb, nbLeft)
   call get_nb(fatherID-1 ,nbLeft)
   if (nbLeft /= -1) return
 
-  !  higher resolution
+  !  higher level or refinemnt
   sonID = selfID*2
   call get_nb(sonID-1,nbLeft)
 
@@ -229,6 +230,7 @@ subroutine getRight(nb, nbRight)
   call get_nb(fatherID+1 ,nbRight)
   if (nbRight /= -1) return
 
+  !  higher level or refinemnt
   sonID = selfID*2
   call get_nb(sonID+2,nbRight)
 
