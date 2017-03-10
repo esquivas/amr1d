@@ -26,6 +26,8 @@ module globals
   real    :: dx(nlevs)
   integer :: minID(nlevs), maxID(nlevs),ActiveBlocks(nbmax)
   integer :: lastActive
+  logical :: FlagRefine(nbmax), FlagCoarse(nbmax)
+  real, parameter :: rThresh = 0.5, cThresh = 0.05
   !
 end module globals
 
@@ -104,6 +106,9 @@ subroutine init_mesh()
   ActiveBlocks(7) = 7
   ActiveBlocks(8) = 13
   lastActive = 8
+
+  FlagRefine(:) = .false.
+  FlagCoarse(:) = .false.
 
   return
 end subroutine init_mesh
@@ -559,3 +564,163 @@ subroutine boundaries(u)
 
   return
 end subroutine boundaries
+
+!=======================================================================
+! Mark (set flag) blocks for refinement/coarsening based on then
+! gradients of density and pressure
+subroutine FlagGrads(prim)
+  use globals, only : FlagRefine, FlagCoarse, nbmax, rThresh, cThresh, &
+                      lastActive, ActiveBlocks, dx, nlevs
+  implicit none
+  real, intent(in):: prim(3,0:nx+1,nbmax)
+  integer :: nb, level, i
+  real    :: gradP, gradrho, maxgrad
+
+  maxgrad = 0.
+  do nb = 1, lastActive
+    if(ActiveBlocks(nb) /= -1 ) then
+
+      call getLevel(ActiveBlocks(nb),level)
+      do i=1,nx
+
+        gradrho = (prim(1,i+1,nb) -prim(1,i-1,nb))/(prim(1,i,nb)*2.*dx(level))
+        gradP =   (prim(3,i+1,nb) -prim(3,i-1,nb))/(prim(3,i,nb)*2.*dx(level))
+
+        maxgrad = max(maxgrad, gradrho)
+        maxgrad = max(maxgrad, gradP  )
+
+        if(maxgrad >= rThresh) then
+          !  mark for refinement (only it not at max resolution already)
+          !  and stop checking
+          if (level < nlevs) FlagRefine(nb) = .true.
+          exit
+        end if
+      end do
+
+      if (maxgrad <= cThresh) then
+        FlagCoarse(nb) = .true.
+      end if
+
+    end if
+  end do
+
+
+  return
+end subroutine
+
+!=======================================================================
+! Mark blocks for refinement based on proximity criteria
+subroutine FLagProx()
+  use globals, only : ActiveBlocks, lastActive, nb,nlevs
+  implicit none
+  integer  :: nb, ilev, myID, IDleft, IDright
+
+  do ilev=nlevs,1,-1
+    do nb = 1, lastActive
+      if(ActiveBlocks(nb) /= -1 ) then
+
+        !  check all blocks marked for refinement and mark the neighbor
+        !  for refinement (and inhibit coarsening) if it is at a lower
+        !  level, just inhibit refinement if it is at same level
+        if(FlagRefine(nb)) then
+
+          myID = ActiveBlocks(nb)
+          !  same level neighbors
+          !  left
+          call get_nb(myID-1,nbLeft)
+          if (nbLeft  /= -1) FlagCoarse(nbLeft ) = .false.
+          !  right
+          call get_nb(myID+1,nbRight)
+          if (nbRight /= -1) FlagCoarse(nbRight) = .false.
+
+          !  lower level neighbors
+          !  left
+          call get_nb(myID/2-1,nbLeft)
+          if (nbLeft  /= -1) then
+            FlagRefine(nbLeft ) = .true.
+            FlagCoarse(nbLeft ) = .false.
+          end if
+          !  right
+          call get_nb(myID/2+1,nbRight)
+          if (nbRight  /= -1) then
+            FlagRefine(nbRight) = .true.
+            FlagCoarse(nbRight) = .false.
+          end if
+
+        end if
+
+        !  Inhibit coarsening if finer neighbors are not set for coarsening
+        if(FlagCoarse(nb)) then
+          !  finer neighbors
+          !  left
+          call get_nb(myID*2-1,nbLeft)
+          if(nbLeft =/ -1) then
+            if(.not.FlagCoarse(nbLeft)) FlagCoarse(nb)=.false.
+          end if
+          !  right
+          call get_nb(myID*2+2,nbRight)
+          if(nbRight =/ -1) then
+            if(.not.FlagCoarse(nbRight)) FlagCoarse(nb)=.false.
+          end if
+
+        end if
+
+      end if
+    end do
+  end do
+
+ return
+end subroutine FLagProx
+
+!=======================================================================
+!  Refines block nb to next level, refinement is applied both to the
+!  primitives and conserved variables
+subroutine refineBlock(dadNb)
+  use globals, only : ActiveBlocks, lastActive
+  implicit none
+  integer, intent(in)  :: dadNb
+  integer :: dadID, son1ID, son2ID, son1nb, son2nb, i
+
+  dadID = ActiveBlocks(dadNb)
+  son1ID = myID*2
+  son2ID = son1ID + 1
+  !  change the bID of the parent for that of the first son/
+  ActiveBlocks(dadNb) = son1ID
+  son1nb =dadNb
+  !  Activate the bID of rthe second son in the first available spot
+  !  increase lastActive if needed
+  son2nb = -1 !  to test if nbmax exceeded what is allowed
+  do nb,1,nbmax
+    if (ActiveBlocks(nb) == -1) then
+      ActiveBlocks(nb) = son2ID
+      son2nb = nb
+      if nb > lastActive
+      lastActive = nb
+      exit
+    end if
+  end do
+  if (son2nb == -1) stop 'nb needed ecxeeded nbmax'
+
+  !  copy data from dad to sons
+  do i = 0, nx+1
+    u(:,i,son1nb) = u(:,(i+1   )/2,dadNb)
+    u(:,i,son2nb) = u(:,(i+1+nx)/2,dadNb)
+  end do
+
+  return
+end subroutine refineBlock
+
+!  updates (refines and coasens) mesh
+subroutine update_mesh()
+  use globals, only : prim, u
+  implicit none
+
+  !  Mark by physical criteria
+  call FlagGrads(prim)
+  !  Mark by proximity
+  call FLagProx()
+
+  !  Perform refinement of marked blocks
+  call Refine()
+  return
+end subroutine update_mesh
