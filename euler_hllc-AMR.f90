@@ -12,11 +12,11 @@ module globals
   implicit none
   !
   !   This is the number of points used to discretize X
-  integer, parameter :: nx=20
+  integer, parameter :: nx=10
   !   Number of levels allowed
-  integer, parameter :: nlevs = 5
+  integer, parameter :: nlevs = 6
   !   maximumn number of blocks
-  integer, parameter :: nbmax = 16
+  integer, parameter :: nbmax = 64
   !   Here we set the extent of X
   real, parameter :: xmax=1.
   real, parameter :: gamma=1.4
@@ -27,7 +27,7 @@ module globals
   integer :: minID(nlevs), maxID(nlevs),ActiveBlocks(nbmax)
   integer :: lastActive
   logical :: FlagRefine(nbmax), FlagCoarse(nbmax)
-  real, parameter :: rThresh = 0.5, cThresh = 0.05
+  real, parameter :: rThresh = 0.1, cThresh = 0.01
   !
 end module globals
 
@@ -53,11 +53,11 @@ program euler_amr
   do while (time.lt.tmax)
 
     ! updates the primitives
-    call u2prim(u,prim)
+    call update_prim(u,prim)
 
     ! output at tprint intervals
     if(time >= tprint) then
-      write(*,*) time,tmax,dt
+      write(*,*) time,tmax,dt, itprint
       call output(itprint)
       tprint=tprint+dtprint
       itprint=itprint+1
@@ -68,6 +68,10 @@ program euler_amr
     !
     ! Integrate u fom t to t+dt
     call tstep(dt,time)
+
+    ! updates mesh
+    call update_mesh()
+
     ! time counter increases
     time=time+dt
 
@@ -80,7 +84,7 @@ end program euler_amr
 !  Initializes all things mesh
 subroutine init_mesh()
   use globals, only : nx, nlevs, xmax, dx, minID, maxID, ActiveBlocks, &
-                      lastActive
+                      lastActive, FlagRefine, FlagCoarse
   implicit none
   integer :: nl
 
@@ -251,7 +255,7 @@ subroutine initconds(time, tprint, itprint)
   integer, intent (out) :: itprint
   integer :: nb, level, i
   real    :: xb, x
-  real    :: xp = 0.45
+  real    :: xp = 0.5
 
   !  sweep all ActiveBlocks
   do nb = 1, lastActive
@@ -294,8 +298,8 @@ subroutine initconds(time, tprint, itprint)
 end subroutine initconds
 
 !=======================================================================
-! computes the primitives as a function of the Us
-subroutine u2prim(u,prim)
+! computes the primitives as a function of the Us in all  ActiveBlocks
+subroutine update_prim(u,prim)
   use globals, only : nx, nbmax, gamma, lastActive, ActiveBlocks
   implicit none
   real , intent(in)   :: u   (3,0:nx+1,nbmax)
@@ -306,16 +310,29 @@ subroutine u2prim(u,prim)
     if (ActiveBlocks(nb) /= -1 ) then
 
       do i=0,nx+1
-        prim(1,i,nb) = u(1,i,nb)
-        prim(2,i,nb) = u(2,i,nb)/u(1,i,nb)
-        prim(3,i,nb) = (u(3,i,nb)-0.5*prim(1,i,nb)*prim(2,i,nb)**2)*(gamma-1.)
+        call u2prim(gamma,u(:,i,nb),prim(:,i,nb))
       end do
 
     endif
   end do
 
   return
-end subroutine u2prim
+end subroutine update_prim
+
+!=======================================================================
+! Computes primitives from the conserved vars in a single cell
+subroutine u2prim(gamma,uu,pp)
+  implicit none
+  real, intent(in)   :: gamma
+  real , intent(in)  :: uu(3)
+  real , intent(out) :: pp(3)
+
+  pp(1) = uu(1)
+  pp(2) = uu(2)/uu(1)
+  pp(3) = (uu(3)-0.5*pp(1)*pp(2)**2)*(gamma-1.)
+
+return
+end subroutine
 
 !=======================================================================
 ! output to file
@@ -570,14 +587,14 @@ end subroutine boundaries
 ! gradients of density and pressure
 subroutine FlagGrads(prim)
   use globals, only : FlagRefine, FlagCoarse, nbmax, rThresh, cThresh, &
-                      lastActive, ActiveBlocks, dx, nlevs
+                      lastActive, ActiveBlocks, dx, nlevs, nx
   implicit none
   real, intent(in):: prim(3,0:nx+1,nbmax)
   integer :: nb, level, i
   real    :: gradP, gradrho, maxgrad
 
-  maxgrad = 0.
   do nb = 1, lastActive
+    maxgrad = 0.
     if(ActiveBlocks(nb) /= -1 ) then
 
       call getLevel(ActiveBlocks(nb),level)
@@ -611,9 +628,10 @@ end subroutine
 !=======================================================================
 ! Mark blocks for refinement based on proximity criteria
 subroutine FLagProx()
-  use globals, only : ActiveBlocks, lastActive, nb,nlevs
+  use globals, only : ActiveBlocks, lastActive, nlevs, FlagRefine, &
+                      FlagCoarse
   implicit none
-  integer  :: nb, ilev, myID, IDleft, IDright
+  integer  :: nb, ilev, dadID, nbLeft, nbRight
 
   do ilev=nlevs,1,-1
     do nb = 1, lastActive
@@ -623,25 +641,24 @@ subroutine FLagProx()
         !  for refinement (and inhibit coarsening) if it is at a lower
         !  level, just inhibit refinement if it is at same level
         if(FlagRefine(nb)) then
-
-          myID = ActiveBlocks(nb)
+          dadID = ActiveBlocks(nb)
           !  same level neighbors
           !  left
-          call get_nb(myID-1,nbLeft)
+          call get_nb(dadID-1,nbLeft)
           if (nbLeft  /= -1) FlagCoarse(nbLeft ) = .false.
           !  right
-          call get_nb(myID+1,nbRight)
+          call get_nb(dadID+1,nbRight)
           if (nbRight /= -1) FlagCoarse(nbRight) = .false.
 
           !  lower level neighbors
           !  left
-          call get_nb(myID/2-1,nbLeft)
+          call get_nb(dadID/2-1,nbLeft)
           if (nbLeft  /= -1) then
             FlagRefine(nbLeft ) = .true.
             FlagCoarse(nbLeft ) = .false.
           end if
           !  right
-          call get_nb(myID/2+1,nbRight)
+          call get_nb(dadID/2+1,nbRight)
           if (nbRight  /= -1) then
             FlagRefine(nbRight) = .true.
             FlagCoarse(nbRight) = .false.
@@ -653,13 +670,13 @@ subroutine FLagProx()
         if(FlagCoarse(nb)) then
           !  finer neighbors
           !  left
-          call get_nb(myID*2-1,nbLeft)
-          if(nbLeft =/ -1) then
+          call get_nb(dadID*2-1,nbLeft)
+          if(nbLeft /= -1) then
             if(.not.FlagCoarse(nbLeft)) FlagCoarse(nb)=.false.
           end if
           !  right
-          call get_nb(myID*2+2,nbRight)
-          if(nbRight =/ -1) then
+          call get_nb(dadID*2+2,nbRight)
+          if(nbRight /= -1) then
             if(.not.FlagCoarse(nbRight)) FlagCoarse(nb)=.false.
           end if
 
@@ -676,13 +693,14 @@ end subroutine FLagProx
 !  Refines block nb to next level, refinement is applied both to the
 !  primitives and conserved variables
 subroutine refineBlock(dadNb)
-  use globals, only : ActiveBlocks, lastActive
+  use globals, only : ActiveBlocks, lastActive, nx, nbmax, u, prim, &
+                      gamma, FlagRefine
   implicit none
   integer, intent(in)  :: dadNb
-  integer :: dadID, son1ID, son2ID, son1nb, son2nb, i
+  integer :: dadID, son1ID, son2ID, son1nb, son2nb, nb, i
 
   dadID = ActiveBlocks(dadNb)
-  son1ID = myID*2
+  son1ID = dadID*2
   son2ID = son1ID + 1
   !  change the bID of the parent for that of the first son/
   ActiveBlocks(dadNb) = son1ID
@@ -690,37 +708,59 @@ subroutine refineBlock(dadNb)
   !  Activate the bID of rthe second son in the first available spot
   !  increase lastActive if needed
   son2nb = -1 !  to test if nbmax exceeded what is allowed
-  do nb,1,nbmax
+  do nb=1,nbmax
     if (ActiveBlocks(nb) == -1) then
       ActiveBlocks(nb) = son2ID
       son2nb = nb
-      if nb > lastActive
-      lastActive = nb
+      if(nb > lastActive) then
+        lastActive = nb
+      end if
       exit
     end if
   end do
   if (son2nb == -1) stop 'nb needed ecxeeded nbmax'
 
-  !  copy data from dad to sons
+  !  copy data from dad to sons and update primitives
+  !  Second son
   do i = 0, nx+1
-    u(:,i,son1nb) = u(:,(i+1   )/2,dadNb)
     u(:,i,son2nb) = u(:,(i+1+nx)/2,dadNb)
+    call u2prim(gamma,u(:,i,son2nb),prim(:,i,son2nb))
   end do
+  !  first son
+  do i=nx+1,0,-1
+    u(:,i,son1nb) = u(:,(i+1   )/2,dadNb)
+    call u2prim(gamma,u(:,i,son1nb),prim(:,i,son1nb))
+  end do
+
+  !  reset refining flag
+  FlagRefine(dadNb) = .false.
 
   return
 end subroutine refineBlock
 
-!  updates (refines and coasens) mesh
+!=======================================================================
+!  updates (refines and coarsens) mesh
 subroutine update_mesh()
-  use globals, only : prim, u
+  use globals, only : prim, u, ActiveBlocks, lastActive, FlagRefine, FlagCoarse
   implicit none
+  integer  :: nb
 
   !  Mark by physical criteria
   call FlagGrads(prim)
   !  Mark by proximity
   call FLagProx()
 
-  !  Perform refinement of marked blocks
-  call Refine()
+  !  Proceed w/refinement of marked blocks
+  do nb=1,lastActive
+    if (ActiveBlocks(nb) /= -1) then
+      if(FlagRefine(nb)) then
+        print*, 'refining', ActiveBlocks(nb)
+        call refineBlock(nb)
+        print*, lastActive
+      end if
+    end if
+  end do
+
+
   return
 end subroutine update_mesh
