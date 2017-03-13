@@ -753,14 +753,11 @@ subroutine update_mesh()
   !  Proceed w/refinement of marked blocks
   do nb=1,lastActive
     if (ActiveBlocks(nb) /= -1) then
-      if(FlagRefine(nb)) then
-        print*, 'refining', ActiveBlocks(nb)
-        call refineBlock(nb)
-        print*, lastActive
-      end if
+      !if(FlagCoarse(nb)) print*, ActiveBlocks(nb), "marked for coarsening"
+      if(FlagRefine(nb)) call refineBlock(nb)
     end if
-  end do
 
+  end do
 
   return
 end subroutine update_mesh
