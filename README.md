@@ -7,3 +7,5 @@ At this point the solution is obtained with a 1st order Godunov scheme with
 the HLLC fluxes.
 
 *The code is work in progress as the course evolves.*
+The strategy is not ficussed on performance but rather on being easy to
+understand.
