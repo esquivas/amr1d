@@ -27,7 +27,7 @@ module globals
   integer :: minID(nlevs), maxID(nlevs),ActiveBlocks(nbmax)
   integer :: lastActive
   logical :: FlagRefine(nbmax), FlagCoarse(nbmax)
-  real, parameter :: rThresh = 0.1, cThresh = 0.01
+  real, parameter :: rThresh = 0.5, cThresh = 0.05
   !
 end module globals
 
@@ -326,13 +326,12 @@ subroutine u2prim(gamma,uu,pp)
   real, intent(in)   :: gamma
   real , intent(in)  :: uu(3)
   real , intent(out) :: pp(3)
-
   pp(1) = uu(1)
   pp(2) = uu(2)/uu(1)
   pp(3) = (uu(3)-0.5*pp(1)*pp(2)**2)*(gamma-1.)
 
-return
-end subroutine
+  return
+end subroutine u2prim
 
 !=======================================================================
 ! output to file
@@ -594,17 +593,17 @@ subroutine FlagGrads(prim)
   real    :: gradP, gradrho, maxgrad
 
   do nb = 1, lastActive
-    maxgrad = 0.
     if(ActiveBlocks(nb) /= -1 ) then
 
+      maxgrad = 0.
       call getLevel(ActiveBlocks(nb),level)
       do i=1,nx
 
         gradrho = (prim(1,i+1,nb) -prim(1,i-1,nb))/(prim(1,i,nb)*2.*dx(level))
         gradP =   (prim(3,i+1,nb) -prim(3,i-1,nb))/(prim(3,i,nb)*2.*dx(level))
 
-        maxgrad = max(maxgrad, gradrho)
-        maxgrad = max(maxgrad, gradP  )
+        maxgrad = max(maxgrad, abs(gradrho))
+        maxgrad = max(maxgrad, abs(gradP  ))
 
         if(maxgrad >= rThresh) then
           !  mark for refinement (only it not at max resolution already)
@@ -612,9 +611,10 @@ subroutine FlagGrads(prim)
           if (level < nlevs) FlagRefine(nb) = .true.
           exit
         end if
+
       end do
 
-      if (maxgrad <= cThresh) then
+      if (maxgrad < cThresh) then
         FlagCoarse(nb) = .true.
       end if
 
@@ -631,7 +631,7 @@ subroutine FLagProx()
   use globals, only : ActiveBlocks, lastActive, nlevs, FlagRefine, &
                       FlagCoarse
   implicit none
-  integer  :: nb, ilev, dadID, nbLeft, nbRight
+  integer  :: nb, ilev, dadID, nbLeft, nbRight, myID
 
   do ilev=nlevs,1,-1
     do nb = 1, lastActive
@@ -666,20 +666,28 @@ subroutine FLagProx()
 
         end if
 
-        !  Inhibit coarsening if finer neighbors are not set for coarsening
         if(FlagCoarse(nb)) then
+          myID = ActiveBlocks(nb)
+          !  Inhibit coarsening if finer neighbors are not set for coarsening
           !  finer neighbors
-          !  left
-          call get_nb(dadID*2-1,nbLeft)
+          call get_nb(myID*2-1,nbLeft)
           if(nbLeft /= -1) then
             if(.not.FlagCoarse(nbLeft)) FlagCoarse(nb)=.false.
           end if
           !  right
-          call get_nb(dadID*2+2,nbRight)
+          call get_nb(myID*2+2,nbRight)
           if(nbRight /= -1) then
             if(.not.FlagCoarse(nbRight)) FlagCoarse(nb)=.false.
           end if
 
+          !  inhibit coarseining if sibling is not set for coarseining
+          if(mod(myID,2)==0) then ! if block is a 1st son
+            call get_nb(myID+1,nbRight)
+            if(.not.FlagCoarse(nbRight)) FlagCoarse(nb)=.false.
+          else                    ! if block is a 2nd son
+            call get_nb(myID-1,nbLeft)
+            if(.not.FlagCoarse(nbLeft)) FlagCoarse(nb)=.false.
+          end if
         end if
 
       end if
@@ -724,12 +732,12 @@ subroutine refineBlock(dadNb)
   !  Second son
   do i = 0, nx+1
     u(:,i,son2nb) = u(:,(i+1+nx)/2,dadNb)
-    call u2prim(gamma,u(:,i,son2nb),prim(:,i,son2nb))
+    !call u2prim(gamma,u(:,i,son2nb),prim(:,i,son2nb))
   end do
   !  first son
   do i=nx+1,0,-1
     u(:,i,son1nb) = u(:,(i+1   )/2,dadNb)
-    call u2prim(gamma,u(:,i,son1nb),prim(:,i,son1nb))
+    !call u2prim(gamma,u(:,i,son1nb),prim(:,i,son1nb))
   end do
 
   !  reset refining flag
@@ -737,6 +745,59 @@ subroutine refineBlock(dadNb)
 
   return
 end subroutine refineBlock
+
+!=======================================================================
+!  Refines block nb to next level, refinement is applied both to the
+!  primitives and conserved variables
+subroutine coarseBlock(son1nb)
+  use globals, only : ActiveBlocks, lastActive, nx, nbmax, u, prim, &
+                      gamma, FlagCoarse
+  implicit none
+  integer, intent(inout)  :: son1nb
+  integer :: son2ID, son1ID, dadID, son2nb, dadNb, nb, i, ieq
+
+  son1ID = ActiveBlocks(son1nb)
+  if (mod(son1ID,2)==0) then
+    son2ID = son1ID+1
+    call get_nb(son2ID,son2nb)
+  else
+    son1ID = son1ID - 1
+    son2ID = son1ID + 1
+    son2nb = son1nb
+    call get_nb(son1ID,son1nb)
+  end if
+  dadID  = son1ID/2
+
+  !  we will use the memory space of the first son as target
+  dadNb = son1nb
+
+  !  1st half
+  !  The ghost cell does not need to be modified
+  do i=1, nx/2
+    do ieq=1,3
+      u(ieq,i,dadNb) = 0.5* sum (u(ieq,2*i-1:2*i,son1nb) )
+    end do
+  end do
+  !  2nd half
+  do i=1, nx/2
+    do ieq=1,3
+      u(ieq,i+nx/2,dadNb) = 0.5* sum (u(ieq,i:i+1,son2nb) )
+    end do
+  end do
+  !   ghost cell at the right
+  u(:,nx+1,dadNb) = u(:,nx+1,son2nb)
+
+  !  update ActiveBlocks
+  ActiveBlocks(dadNb) = dadID
+  ActiveBlocks(son2nb) = -1
+
+  !  update Coarsening Flags
+  FlagCoarse(son1nb) = .false.
+  FlagCoarse(son2nb) = .false.
+
+  return
+end subroutine coarseBlock
+
 
 !=======================================================================
 !  updates (refines and coarsens) mesh
@@ -753,8 +814,14 @@ subroutine update_mesh()
   !  Proceed w/refinement of marked blocks
   do nb=1,lastActive
     if (ActiveBlocks(nb) /= -1) then
-      !if(FlagCoarse(nb)) print*, ActiveBlocks(nb), "marked for coarsening"
-      if(FlagRefine(nb)) call refineBlock(nb)
+      if(FlagCoarse(nb)) then
+        print*, "Coarsening:", ActiveBlocks(nb)
+        call coarseBlock(nb)
+      end if
+      if(FlagRefine(nb)) then
+        print*, "Refining: ", ActiveBlocks(nb)
+        call refineBlock(nb)
+      end if
     end if
 
   end do
