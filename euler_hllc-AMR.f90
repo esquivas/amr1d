@@ -12,9 +12,9 @@ module globals
   implicit none
   !
   !   This is the number of points used to discretize X
-  integer, parameter :: nx=10
+  integer, parameter :: nx=5
   !   Number of levels allowed
-  integer, parameter :: nlevs = 6
+  integer, parameter :: nlevs = 7
   !   maximumn number of blocks
   integer, parameter :: nbmax = 64
   !   Here we set the extent of X
@@ -49,11 +49,11 @@ program euler_amr
   ! This subroutine generates the initial conditions
   call initconds(time, tprint, itprint)
 
+  ! updates the primitives
+  call update_prim(u,prim)
+
   !   main loop, iterate until maximum time is reached
   do while (time.lt.tmax)
-
-    ! updates the primitives
-    call update_prim(u,prim)
 
     ! output at tprint intervals
     if(time >= tprint) then
@@ -68,6 +68,9 @@ program euler_amr
     !
     ! Integrate u fom t to t+dt
     call tstep(dt,time)
+
+    ! updates the primitives
+    call update_prim(u,prim)
 
     ! updates mesh
     call update_mesh()
@@ -732,12 +735,12 @@ subroutine refineBlock(dadNb)
   !  Second son
   do i = 0, nx+1
     u(:,i,son2nb) = u(:,(i+1+nx)/2,dadNb)
-    !call u2prim(gamma,u(:,i,son2nb),prim(:,i,son2nb))
+    call u2prim(gamma,u(:,i,son2nb),prim(:,i,son2nb))
   end do
   !  first son
   do i=nx+1,0,-1
     u(:,i,son1nb) = u(:,(i+1   )/2,dadNb)
-    !call u2prim(gamma,u(:,i,son1nb),prim(:,i,son1nb))
+    call u2prim(gamma,u(:,i,son1nb),prim(:,i,son1nb))
   end do
 
   !  reset refining flag
@@ -776,16 +779,19 @@ subroutine coarseBlock(son1nb)
   do i=1, nx/2
     do ieq=1,3
       u(ieq,i,dadNb) = 0.5* sum (u(ieq,2*i-1:2*i,son1nb) )
+      call u2prim(gamma,u(:,i,dadNb),prim(:,i,dadNb))
     end do
   end do
   !  2nd half
   do i=1, nx/2
     do ieq=1,3
       u(ieq,i+nx/2,dadNb) = 0.5* sum (u(ieq,i:i+1,son2nb) )
+      call u2prim(gamma,u(:,i,dadNb),prim(:,i,dadNb))
     end do
   end do
   !   ghost cell at the right
   u(:,nx+1,dadNb) = u(:,nx+1,son2nb)
+  call u2prim(gamma,u(:,nx+1,dadNb),prim(:,nx+1,dadNb))
 
   !  update ActiveBlocks
   ActiveBlocks(dadNb) = dadID
